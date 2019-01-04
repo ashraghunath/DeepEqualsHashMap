@@ -1,5 +1,6 @@
 package impl;
 
+
 import com.cedarsoftware.util.DeepEquals;
 
 import java.util.HashMap;
@@ -23,7 +24,7 @@ public class Application {
         class2.setHashMap(hashMap1);
 
         Class1 obj1 = new Class1();
-        obj1.setString("class1obj1");
+        obj1.setString("class1obj11");
         obj1.setClass2Object(class2);
 
         //obj2 creation
