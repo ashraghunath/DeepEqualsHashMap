@@ -65,6 +65,7 @@ public class DeepEquals {
         private final Object _key1;
         private final Object _key2;
 
+
         private DualKey(Object k1, Object k2) {
             _key1 = k1;
             _key2 = k2;
@@ -112,7 +113,7 @@ public class DeepEquals {
      * traversal.
      */
     public static boolean deepEquals(Object a, Object b) {
-        return deepEqualsAshwin(a, b, new HashMap());
+        return deepEqualsAB(a, b, new HashMap());
     }
 
     /**
@@ -303,6 +304,167 @@ public class DeepEquals {
         return true;
     }
 
+    static HashMap<String, Boolean> toReturn = new HashMap<>();
+
+    public static boolean deepEqualsAB(Object a, Object b, Map options) {
+        Set<DualKey> visited = new HashSet<>();
+        Deque<DualKey> stack = new LinkedList<>();
+        Set<String> ignoreCustomEquals = (Set<String>) options.get(IGNORE_CUSTOM_EQUALS);
+        stack.addFirst(new DualKey(a, b));
+        //changes
+
+        //
+        while (!stack.isEmpty()) {
+            DualKey dualKey = stack.removeFirst();
+            visited.add(dualKey);
+
+            if (dualKey._key1 == dualKey._key2) {   // Same instance is always equal to itself.
+                continue;
+            }
+
+            if (dualKey._key1 == null || dualKey._key2 == null) {   // If either one is null, not equal (both can't be null, due to above comparison).
+                return false;
+            }
+
+            if (dualKey._key1 instanceof Double && compareFloatingPointNumbers(dualKey._key1, dualKey._key2, doubleEplison)) {
+                continue;
+            }
+
+            if (dualKey._key1 instanceof Float && compareFloatingPointNumbers(dualKey._key1, dualKey._key2, floatEplison)) {
+                continue;
+            }
+
+            Class key1Class = dualKey._key1.getClass();
+
+            if (key1Class.isPrimitive() || prims.contains(key1Class) || dualKey._key1 instanceof String || dualKey._key1 instanceof Date || dualKey._key1 instanceof Class) {
+                if (!dualKey._key1.equals(dualKey._key2)) {
+                    return false;
+                }
+                continue;   // Nothing further to push on the stack
+            }
+
+            if (dualKey._key1 instanceof Collection) {   // If Collections, they both must be Collection
+                if (!(dualKey._key2 instanceof Collection)) {
+                    return false;
+                }
+            } else if (dualKey._key2 instanceof Collection) {   // They both must be Collection
+                return false;
+            }
+
+            if (dualKey._key1 instanceof SortedSet) {
+                if (!(dualKey._key2 instanceof SortedSet)) {
+                    return false;
+                }
+            } else if (dualKey._key2 instanceof SortedSet) {
+                return false;
+            }
+
+            if (dualKey._key1 instanceof SortedMap) {
+                if (!(dualKey._key2 instanceof SortedMap)) {
+                    return false;
+                }
+            } else if (dualKey._key2 instanceof SortedMap) {
+                return false;
+            }
+
+            if (dualKey._key1 instanceof Map) {
+                if (!(dualKey._key2 instanceof Map)) {
+                    return false;
+                }
+            } else if (dualKey._key2 instanceof Map) {
+                return false;
+            }
+
+            if (!isContainerType(dualKey._key1) && !isContainerType(dualKey._key2) && !key1Class.equals(dualKey._key2.getClass())) {   // Must be same class
+                return false;
+            }
+
+            // Handle all [] types.  In order to be equal, the arrays must be the same
+            // length, be of the same type, be in the same order, and all elements within
+            // the array must be deeply equivalent.
+            if (key1Class.isArray()) {
+                if (!compareArrays(dualKey._key1, dualKey._key2, stack, visited)) {
+                    return false;
+                }
+                continue;
+            }
+
+            // Special handle SortedSets because they are fast to compare because their
+            // elements must be in the same order to be equivalent Sets.
+            if (dualKey._key1 instanceof SortedSet) {
+                if (!compareOrderedCollection((Collection) dualKey._key1, (Collection) dualKey._key2, stack, visited)) {
+                    return false;
+                }
+                continue;
+            }
+
+            // Handled unordered Sets.  This is a slightly more expensive comparison because order cannot
+            // be assumed, a temporary Map must be created, however the comparison still runs in O(N) time.
+            if (dualKey._key1 instanceof Set) {
+                if (!compareUnorderedCollection((Collection) dualKey._key1, (Collection) dualKey._key2, stack, visited)) {
+                    return false;
+                }
+                continue;
+            }
+
+            // Check any Collection that is not a Set.  In these cases, element order
+            // matters, therefore this comparison is faster than using unordered comparison.
+            if (dualKey._key1 instanceof Collection) {
+                if (!compareOrderedCollection((Collection) dualKey._key1, (Collection) dualKey._key2, stack, visited)) {
+                    return false;
+                }
+                continue;
+            }
+
+            // Compare two SortedMaps.  This takes advantage of the fact that these
+            // Maps can be compared in O(N) time due to their ordering.
+            if (dualKey._key1 instanceof SortedMap) {
+                if (!compareSortedMap((SortedMap) dualKey._key1, (SortedMap) dualKey._key2, stack, visited)) {
+                    return false;
+                }
+                continue;
+            }
+
+            // Compare two Unordered Maps. This is a slightly more expensive comparison because
+            // order cannot be assumed, therefore a temporary Map must be created, however the
+            // comparison still runs in O(N) time.
+            if (dualKey._key1 instanceof Map) {
+                if (!compareUnorderedMap((Map) dualKey._key1, (Map) dualKey._key2, stack, visited)) {
+                    return false;
+                }
+                continue;
+            }
+
+            // If there is a custom equals ... AND
+            // the caller has not specified any classes to skip ... OR
+            // the caller has specified come classes to ignore and this one is not in the list ... THEN
+            // compare using the custom equals.
+            if (hasCustomEquals(key1Class)) {
+                if (ignoreCustomEquals == null || (ignoreCustomEquals.size() > 0 && !ignoreCustomEquals.contains(key1Class))) {
+                    if (!dualKey._key1.equals(dualKey._key2)) {
+                        return false;
+                    }
+                    continue;
+                }
+            }
+
+            Collection<Field> fields = ReflectionUtils.getDeepDeclaredFields(key1Class);
+
+            for (Field field : fields) {
+                try {
+                    System.out.println(field.get(dualKey._key1) + ", " + field.get(dualKey._key2) + "==>" + DeepEquals.deepEquals(field.get(dualKey._key1), field.get(dualKey._key2)));
+                    System.out.println(field.getDeclaringClass().getSimpleName());
+                    System.out.println(field.getName());
+                    toReturn.put(field.getDeclaringClass().getSimpleName() + "." + field.getName(), DeepEquals.deepEquals(field.get(dualKey._key1), field.get(dualKey._key2)));
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        System.out.println(toReturn);
+        return true;
+    }
+
+
     public static boolean deepEqualsAshwin(Object a, Object b, Map options) {
         Set<DualKey> visited = new HashSet<>();
         Deque<DualKey> stack = new LinkedList<>();
@@ -451,20 +613,21 @@ public class DeepEquals {
                 try {
                     Object number1 = field.get(dualKey._key1);
                     Object number2 = field.get(dualKey._key2);
+                    System.out.println(number1);
                     System.out.println("field is " + field.getName());
-                    Field[] f = a.getClass().getDeclaredFields();
-                    String classname = a.getClass().getSimpleName()+"."+field.getName();
+                    Field[] f = field.getDeclaringClass().getDeclaredFields();
+                    String classname = a.getClass().getSimpleName() + "." + field.getName();
 //                    System.out.println(classname);
 
                     if (field.get(dualKey._key1).equals(field.get(dualKey._key2))) {
 
                         for (Field field1 : f) {
                             if (field1.equals(field))
-                                toReturn.put(a.getClass().getSimpleName() + "." + field.getName(), true);
+                                toReturn.put(field.getDeclaringClass().toString() + "." + field.getName(), true);
                         }
 
                     } else
-                        toReturn.put(a.getClass().getSimpleName() + "." + field.getName(), false);
+                        toReturn.put(field.getDeclaringClass().toString() + "." + field.getName(), false);
                     DualKey dk = new DualKey(field.get(dualKey._key1), field.get(dualKey._key2));
                     if (!visited.contains(dk)) {
                         stack.addFirst(dk);
